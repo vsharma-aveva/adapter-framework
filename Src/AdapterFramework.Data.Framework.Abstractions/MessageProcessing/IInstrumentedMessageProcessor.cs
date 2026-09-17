@@ -1,4 +1,4 @@
-// Copyright 2018-2026 AVEVA Group Limited
+﻿// Copyright 2018-2026 AVEVA Group Limited
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,6 +39,18 @@ public interface IInstrumentedMessageProcessor : IMessageProcessor
     /// </summary>
     /// <returns>Current <see cref="DataType"/> count.</returns>
     int GetTypeCount();
+
+    /// <summary>
+    /// Gets the current number of unique OMF 2.0 entity identities accepted and retained by the processor.
+    /// </summary>
+    /// <returns>Current asset count.</returns>
+    int GetAssetCount() => 0;
+
+    /// <summary>
+    /// Gets the current number of unique OMF 2.0 event identities accepted and retained by the processor.
+    /// </summary>
+    /// <returns>Current event count.</returns>
+    int GetEventCount() => 0;
 
     /// <summary>
     /// Gets and resets total number of data events sent through the processor and resets

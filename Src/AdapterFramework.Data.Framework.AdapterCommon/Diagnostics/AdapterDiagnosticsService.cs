@@ -1,4 +1,4 @@
-// Copyright 2018-2026 AVEVA Group Limited
+﻿// Copyright 2018-2026 AVEVA Group Limited
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,6 +32,8 @@ public class AdapterDiagnosticsService : IEdgeComponentDiagnosticsService
 
     private const int MovingAveragePeriod = 60;
     private const int SendStreamCountPeriod = 60;
+    private const int SendAssetCountPeriod = 60;
+    private const int SendEventCountPeriod = 60;
     private const int SendIoRatePeriod = 60;
     private const int SendErrorRatePeriod = 60;
 
@@ -59,8 +61,12 @@ public class AdapterDiagnosticsService : IEdgeComponentDiagnosticsService
     private int _errorRateTimerTickCounter;
     private int _timerTickIoRateCounter;
     private int _timerTickStreamCounter;
+    private int _timerTickAssetCounter;
+    private int _timerTickEventCounter;
     private int _sentStreamCount = -1;
     private int _sentTypeCount = -1;
+    private int _sentAssetCount = -1;
+    private int _sentEventCount = -1;
     private bool _failedToCreateDiagnosticsTypes;
     private bool _failedToUpdateErrorRate;
     private bool _failedToUpdateMessageProcessorStatistics;
@@ -161,6 +167,8 @@ public class AdapterDiagnosticsService : IEdgeComponentDiagnosticsService
     {
         CreateDiagnosticsTypesStreams();
         SendStreamCountEvent(_sentStreamCount, _sentTypeCount);
+        SendAssetCountEvent(_sentAssetCount);
+        SendEventCountEvent(_sentEventCount);
     }
 
     public void Dispose()
@@ -260,6 +268,8 @@ public class AdapterDiagnosticsService : IEdgeComponentDiagnosticsService
 
                 SendIoRateEvent();
                 SendStreamCountEventWhenChanged();
+                SendAssetCountEventWhenChanged();
+                SendEventCountEventWhenChanged();
             }
             finally
             {
@@ -332,6 +342,84 @@ public class AdapterDiagnosticsService : IEdgeComponentDiagnosticsService
         catch (Exception ex)
         {
             _instrumentedLogger.LogError(ex, "Failed to process StreamCount diagnostics event. Stopping IORate and StreamCount diagnostics data collection.");
+
+            _failedToUpdateMessageProcessorStatistics = true;
+        }
+    }
+
+    private void SendAssetCountEventWhenChanged()
+    {
+        if (_timerTickAssetCounter <= 0)
+        {
+            _timerTickAssetCounter = SendAssetCountPeriod;
+
+            var currentAssetCount = _instrumentedMessageProcessor.GetAssetCount();
+
+            if (currentAssetCount != _sentAssetCount)
+            {
+                Interlocked.Exchange(ref _sentAssetCount, currentAssetCount);
+
+                SendAssetCountEvent(currentAssetCount);
+            }
+        }
+
+        _timerTickAssetCounter--;
+    }
+
+    private void SendEventCountEventWhenChanged()
+    {
+        if (_timerTickEventCounter <= 0)
+        {
+            _timerTickEventCounter = SendEventCountPeriod;
+
+            var currentEventCount = _instrumentedMessageProcessor.GetEventCount();
+
+            if (currentEventCount != _sentEventCount)
+            {
+                Interlocked.Exchange(ref _sentEventCount, currentEventCount);
+
+                SendEventCountEvent(currentEventCount);
+            }
+        }
+
+        _timerTickEventCounter--;
+    }
+
+    private void SendAssetCountEvent(int assetCount)
+    {
+        var assetCountEvent = new AssetCountEvent
+        {
+            Timestamp = DateTime.UtcNow,
+            AssetCount = assetCount,
+        };
+
+        try
+        {
+            _diagnosticsMessageProcessor.WriteDiagnosticsValue(_diagnosticsOmfMessageCreator.GetAssetCountStreamId(), Classification.Dynamic, assetCountEvent);
+        }
+        catch (Exception ex)
+        {
+            _instrumentedLogger.LogError(ex, "Failed to process AssetCount diagnostics event. Stopping message processor statistics diagnostics data collection.");
+
+            _failedToUpdateMessageProcessorStatistics = true;
+        }
+    }
+
+    private void SendEventCountEvent(int eventCount)
+    {
+        var eventCountEvent = new EventCountEvent
+        {
+            Timestamp = DateTime.UtcNow,
+            EventCount = eventCount,
+        };
+
+        try
+        {
+            _diagnosticsMessageProcessor.WriteDiagnosticsValue(_diagnosticsOmfMessageCreator.GetEventCountStreamId(), Classification.Dynamic, eventCountEvent);
+        }
+        catch (Exception ex)
+        {
+            _instrumentedLogger.LogError(ex, "Failed to process EventCount diagnostics event. Stopping message processor statistics diagnostics data collection.");
 
             _failedToUpdateMessageProcessorStatistics = true;
         }
