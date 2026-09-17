@@ -255,13 +255,19 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
         return _typeCount;
     }
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Gets the current number of unique OMF 2.0 entity identities accepted and retained by the processor.
+    /// </summary>
+    /// <returns>Current asset count.</returns>
     public int GetAssetCount()
     {
         return _assetCount;
     }
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Gets the current number of unique OMF 2.0 event identities accepted and retained by the processor.
+    /// </summary>
+    /// <returns>Current event count.</returns>
     public int GetEventCount()
     {
         return _eventCount;
