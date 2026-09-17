@@ -889,12 +889,55 @@ public class InstrumentedMessageProcessor_Tests
         Assert.Equal(expectedEventsCount, instrumentedMessageProcessor.GetStreamCount());
         Assert.Equal(expectedEventsCount, instrumentedMessageProcessor.GetTypeCount());
 
+        instrumentedMessageProcessor.WriteStaticValue(TestTypeIdBase, "asset-1", "asset-1", "description", TestComponentId, new { Value = 1 }, null, null, messageAction: MessageAction.Default);
+        instrumentedMessageProcessor.WriteEvent("event-1", TestTypeIdBase, "event-1", "description", TestComponentId, DateTime.UtcNow, null, null, null, new { Value = 1 });
+
+        Assert.Equal(1, instrumentedMessageProcessor.GetAssetCount());
+        Assert.Equal(1, instrumentedMessageProcessor.GetEventCount());
+
         instrumentedMessageProcessor.ClearCounters();
         expectedEventsCount = 0;
 
         Assert.Equal(expectedEventsCount, instrumentedMessageProcessor.GetAndResetEventsCounter());
         Assert.Equal(expectedEventsCount, instrumentedMessageProcessor.GetStreamCount());
         Assert.Equal(expectedEventsCount, instrumentedMessageProcessor.GetTypeCount());
+        Assert.Equal(expectedEventsCount, instrumentedMessageProcessor.GetAssetCount());
+        Assert.Equal(expectedEventsCount, instrumentedMessageProcessor.GetEventCount());
+
+        instrumentedMessageProcessor.WriteStaticValue(TestTypeIdBase, "asset-1", "asset-1", "description", TestComponentId, new { Value = 2 }, null, null, messageAction: MessageAction.Default);
+        instrumentedMessageProcessor.WriteEvent("event-1", TestTypeIdBase, "event-1", "description", TestComponentId, DateTime.UtcNow, null, null, null, new { Value = 2 });
+
+        Assert.Equal(1, instrumentedMessageProcessor.GetAssetCount());
+        Assert.Equal(1, instrumentedMessageProcessor.GetEventCount());
+    }
+
+    [Fact]
+    public void InstrumentedMessageProcessor_ClearCounters_ClearsRelationships_Test()
+    {
+        var resentRelationships = new List<(Link Link, MessageAction Action)>();
+        var resending = false;
+
+        var mockOmfMessageProcessor = new Mock<IMessageProcessor>();
+        mockOmfMessageProcessor.Setup(mp => mp.WriteSchemaRelationship(It.IsAny<Link>(), It.IsAny<MessageAction>()))
+            .Callback((Link link, MessageAction action) =>
+            {
+                if (resending)
+                {
+                    resentRelationships.Add((link, action));
+                }
+            });
+
+        var instrumentedMessageProcessor = new InstrumentedMessageProcessor(mockOmfMessageProcessor.Object, _mLogger.Object, TestComponentId, TestComponentType);
+        var link = new Link(new DataTypeLinkNode("E1", null) { Property = "p1" }, new DataTypeLinkNode("int", null));
+
+        instrumentedMessageProcessor.WriteSchemaRelationship(link, MessageAction.Create);
+
+        instrumentedMessageProcessor.ClearCounters();
+
+        resending = true;
+        instrumentedMessageProcessor.ResendTypesAndStreams();
+
+        Assert.Empty(resentRelationships);
     }
 
     [Fact]
