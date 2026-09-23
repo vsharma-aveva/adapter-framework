@@ -39,6 +39,8 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
     private readonly ConcurrentDictionary<string, (Link Link, MessageAction MessageAction, long Sequence)> _relationships = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, byte> _entityIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, byte> _eventIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _assetCountSync = new();
+    private readonly object _eventCountSync = new();
     private readonly Dictionary<string, object> _metaDataDictionary;
     private readonly Dictionary<StreamProperties, Action<PropertyDefinitionOverride>> _propertyOverrideActions;
     private readonly string _componentId;
@@ -279,13 +281,20 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
         Interlocked.Exchange(ref _typeCount, 0);
         Interlocked.Exchange(ref _streamCount, 0);
         Interlocked.Exchange(ref _eventsCount, 0);
-        Interlocked.Exchange(ref _assetCount, 0);
-        Interlocked.Exchange(ref _eventCount, 0);
 
         // Clear the retained identity sets along with the gauges so the next writes for any identity
         // (new or previously known) are treated as new and correctly rebuild the count.
-        _entityIds.Clear();
-        _eventIds.Clear();
+        lock (_assetCountSync)
+        {
+            Interlocked.Exchange(ref _assetCount, 0);
+            _entityIds.Clear();
+        }
+
+        lock (_eventCountSync)
+        {
+            Interlocked.Exchange(ref _eventCount, 0);
+            _eventIds.Clear();
+        }
     }
 
     #endregion
@@ -402,16 +411,19 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
     // Tracks unique entity identities so GetAssetCount() reports a current-state gauge, mirroring the stream/type caches.
     private void TrackEntityIdentity(string entityId, MessageAction messageAction)
     {
-        if (messageAction == MessageAction.Delete)
+        lock (_assetCountSync)
         {
-            if (_entityIds.TryRemove(entityId, out _))
+            if (messageAction == MessageAction.Delete)
             {
-                DecrementAssetCountIfPositive();
+                if (_entityIds.TryRemove(entityId, out _))
+                {
+                    DecrementAssetCountIfPositive();
+                }
             }
-        }
-        else if (_entityIds.TryAdd(entityId, 0))
-        {
-            Interlocked.Increment(ref _assetCount);
+            else if (_entityIds.TryAdd(entityId, 0))
+            {
+                Interlocked.Increment(ref _assetCount);
+            }
         }
     }
 
@@ -436,16 +448,19 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
     // an unknown/untracked event ID do not decrement the count.
     private void TrackEventCount(string eventId, MessageAction messageAction)
     {
-        if (messageAction == MessageAction.Delete)
+        lock (_eventCountSync)
         {
-            if (_eventIds.TryRemove(eventId, out _))
+            if (messageAction == MessageAction.Delete)
             {
-                DecrementEventCountIfPositive();
+                if (_eventIds.TryRemove(eventId, out _))
+                {
+                    DecrementEventCountIfPositive();
+                }
             }
-        }
-        else if (_eventIds.TryAdd(eventId, 0))
-        {
-            Interlocked.Increment(ref _eventCount);
+            else if (_eventIds.TryAdd(eventId, 0))
+            {
+                Interlocked.Increment(ref _eventCount);
+            }
         }
     }
 
