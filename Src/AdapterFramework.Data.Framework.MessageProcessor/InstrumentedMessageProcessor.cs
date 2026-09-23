@@ -191,9 +191,12 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
     {
         var entityId = id.ToOmfIdentifier();
 
-        _messageProcessor.WriteStaticValue(ToOmfTypeIdOrNull(typeId, messageAction), entityId, name, description, GetDataSource(dataSource, id), extendedPropertyDefinitions, propertyOverrides, instance, metadata, tags, relationships, messageAction);
+        lock (_assetCountSync)
+        {
+            _messageProcessor.WriteStaticValue(ToOmfTypeIdOrNull(typeId, messageAction), entityId, name, description, GetDataSource(dataSource, id), extendedPropertyDefinitions, propertyOverrides, instance, metadata, tags, relationships, messageAction);
+            TrackEntityIdentity(entityId, messageAction);
+        }
 
-        TrackEntityIdentity(entityId, messageAction);
         IncrementEventsCount();
     }
 
@@ -202,9 +205,12 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
     {
         var entityId = id.ToOmfIdentifier();
 
-        _messageProcessor.WriteStaticValue(ToOmfTypeIdOrNull(typeId, messageAction), entityId, name, description, GetDataSource(dataSource, id), instance, metadata, tags, propertyOverrides, messageAction);
+        lock (_assetCountSync)
+        {
+            _messageProcessor.WriteStaticValue(ToOmfTypeIdOrNull(typeId, messageAction), entityId, name, description, GetDataSource(dataSource, id), instance, metadata, tags, propertyOverrides, messageAction);
+            TrackEntityIdentity(entityId, messageAction);
+        }
 
-        TrackEntityIdentity(entityId, messageAction);
         IncrementEventsCount();
     }
 
@@ -214,10 +220,13 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
     {
         var eventId = id.ToOmfIdentifier();
 
-        _messageProcessor.WriteEvent(eventId, typeId.ToOmfIdentifier(), name, description, GetDataSource(dataSource, id), startTime, endTime,
-            extendedPropertyDefinitions, propertyOverrides, instance, metadata, tags, relationships, messageAction);
+        lock (_eventCountSync)
+        {
+            _messageProcessor.WriteEvent(eventId, typeId.ToOmfIdentifier(), name, description, GetDataSource(dataSource, id), startTime, endTime,
+                extendedPropertyDefinitions, propertyOverrides, instance, metadata, tags, relationships, messageAction);
+            TrackEventCount(eventId, messageAction);
+        }
 
-        TrackEventCount(eventId, messageAction);
         IncrementEventsCount();
     }
 
