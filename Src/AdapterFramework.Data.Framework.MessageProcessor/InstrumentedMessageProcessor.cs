@@ -33,16 +33,16 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
 {
     #region Private Fields
 
+    private const int IdentityWriteLockStripeCount = 64;
+
     private readonly IMessageProcessor _messageProcessor;
     private readonly ConcurrentDictionary<string, (DataType DataType, MessageAction MessageAction, long Sequence)> _dataTypes = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, (DataStream DataStream, MessageAction MessageAction, long Sequence)> _dataStreams = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, (Link Link, MessageAction MessageAction, long Sequence)> _relationships = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, byte> _entityIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, byte> _eventIds = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, object> _entityWriteSync = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, object> _eventWriteSync = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ReaderWriterLockSlim _assetCountResetSync = new(LockRecursionPolicy.NoRecursion);
-    private readonly ReaderWriterLockSlim _eventCountResetSync = new(LockRecursionPolicy.NoRecursion);
+    private readonly object[] _entityWriteSync = CreateStripedLocks();
+    private readonly object[] _eventWriteSync = CreateStripedLocks();
     private readonly Dictionary<string, object> _metaDataDictionary;
     private readonly Dictionary<StreamProperties, Action<PropertyDefinitionOverride>> _propertyOverrideActions;
     private readonly string _componentId;
@@ -292,29 +292,17 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
 
         // Clear the retained identity sets along with the gauges so the next writes for any identity
         // (new or previously known) are treated as new and correctly rebuild the count.
-        _assetCountResetSync.EnterWriteLock();
-        try
+        ExecuteWithAllLocksHeld(_entityWriteSync, () =>
         {
             Interlocked.Exchange(ref _assetCount, 0);
             _entityIds.Clear();
-            _entityWriteSync.Clear();
-        }
-        finally
-        {
-            _assetCountResetSync.ExitWriteLock();
-        }
+        });
 
-        _eventCountResetSync.EnterWriteLock();
-        try
+        ExecuteWithAllLocksHeld(_eventWriteSync, () =>
         {
             Interlocked.Exchange(ref _eventCount, 0);
             _eventIds.Clear();
-            _eventWriteSync.Clear();
-        }
-        finally
-        {
-            _eventCountResetSync.ExitWriteLock();
-        }
+        });
     }
 
     #endregion
@@ -430,32 +418,59 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
 
     private void PerformTrackedAssetWrite(string entityId, Action writeAction, MessageAction messageAction)
     {
-        ExecuteTrackedWrite(_assetCountResetSync, _entityWriteSync, entityId, writeAction, () => TrackEntityIdentity(entityId, messageAction));
+        ExecuteTrackedWrite(_entityWriteSync, entityId, writeAction, () => TrackEntityIdentity(entityId, messageAction));
     }
 
     private void PerformTrackedEventWrite(string eventId, Action writeAction, MessageAction messageAction)
     {
-        ExecuteTrackedWrite(_eventCountResetSync, _eventWriteSync, eventId, writeAction, () => TrackEventCount(eventId, messageAction));
+        ExecuteTrackedWrite(_eventWriteSync, eventId, writeAction, () => TrackEventCount(eventId, messageAction));
     }
 
-    private static void ExecuteTrackedWrite(ReaderWriterLockSlim resetSync, ConcurrentDictionary<string, object> identityWriteSync, string identityId, Action writeAction, Action trackAction)
+    private static object[] CreateStripedLocks()
     {
-        resetSync.EnterReadLock();
+        var locks = new object[IdentityWriteLockStripeCount];
+        for (var i = 0; i < locks.Length; i++)
+        {
+            locks[i] = new object();
+        }
+
+        return locks;
+    }
+
+    private static void ExecuteTrackedWrite(object[] identityWriteSync, string identityId, Action writeAction, Action trackAction)
+    {
+        var identitySync = identityWriteSync[GetIdentityLockIndex(identityId)];
+
+        lock (identitySync)
+        {
+            writeAction();
+            trackAction();
+        }
+    }
+
+    private static void ExecuteWithAllLocksHeld(object[] stripedLocks, Action action)
+    {
+        for (var i = 0; i < stripedLocks.Length; i++)
+        {
+            Monitor.Enter(stripedLocks[i]);
+        }
 
         try
         {
-            var identitySync = identityWriteSync.GetOrAdd(identityId, _ => new object());
-
-            lock (identitySync)
-            {
-                writeAction();
-                trackAction();
-            }
+            action();
         }
         finally
         {
-            resetSync.ExitReadLock();
+            for (var i = stripedLocks.Length - 1; i >= 0; i--)
+            {
+                Monitor.Exit(stripedLocks[i]);
+            }
         }
+    }
+
+    private static int GetIdentityLockIndex(string identityId)
+    {
+        return (StringComparer.OrdinalIgnoreCase.GetHashCode(identityId) & int.MaxValue) % IdentityWriteLockStripeCount;
     }
 
     // Tracks unique entity identities so GetAssetCount() reports a current-state gauge, mirroring the stream/type caches.

@@ -16,6 +16,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -967,12 +968,13 @@ public class InstrumentedMessageProcessor_Tests
     }
 
     [Fact]
-    public void InstrumentedMessageProcessor_GetAssetCount_DifferentIdentities_DoNotBlockEachOther_Test()
+    public void InstrumentedMessageProcessor_GetAssetCount_DifferentIdentitiesInDifferentStripes_DoNotBlockEachOther_Test()
     {
         using var firstWriteEntered = new ManualResetEventSlim(false);
         using var allowFirstWriteToReturn = new ManualResetEventSlim(false);
 
-        var blockedEntityId = "Entity-1".ToOmfIdentifier();
+        var (blockedEntityId, unblockedEntityId) = GetIdsInDifferentStripes("Entity");
+        blockedEntityId = blockedEntityId.ToOmfIdentifier();
         var mockOmfMessageProcessor = new Mock<IMessageProcessor>();
         mockOmfMessageProcessor.Setup(mp => mp.WriteStaticValue(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
                 It.IsAny<Dictionary<string, string>>(), It.IsAny<IReadOnlyDictionary<string, object>>(), It.IsAny<List<string>>(),
@@ -990,12 +992,12 @@ public class InstrumentedMessageProcessor_Tests
         var instrumentedMessageProcessor = new InstrumentedMessageProcessor(mockOmfMessageProcessor.Object, _mLogger.Object, TestComponentId, TestComponentType);
         var instance = new Dictionary<string, string> { { "prop1", "prop1Value" } };
 
-        var firstWriteTask = Task.Run(() => instrumentedMessageProcessor.WriteStaticValue(TestTypeIdBase, "Entity-1", "name", "description", "dataSource",
+        var firstWriteTask = Task.Run(() => instrumentedMessageProcessor.WriteStaticValue(TestTypeIdBase, blockedEntityId, "name", "description", "dataSource",
             instance, null, null, null, MessageAction.Create));
 
         Assert.True(firstWriteEntered.Wait(TimeSpan.FromSeconds(2)));
 
-        var secondWriteTask = Task.Run(() => instrumentedMessageProcessor.WriteStaticValue(TestTypeIdBase, "Entity-2", "name", "description", "dataSource",
+        var secondWriteTask = Task.Run(() => instrumentedMessageProcessor.WriteStaticValue(TestTypeIdBase, unblockedEntityId, "name", "description", "dataSource",
             instance, null, null, null, MessageAction.Create));
 
         Assert.True(secondWriteTask.Wait(TimeSpan.FromSeconds(2)));
@@ -1012,6 +1014,27 @@ public class InstrumentedMessageProcessor_Tests
         var instrumentedMessageProcessor = new InstrumentedMessageProcessor(mockOmfMessageProcessor.Object, _mLogger.Object, TestComponentId, TestComponentType);
 
         Assert.Equal(0, instrumentedMessageProcessor.GetAssetCount());
+    }
+
+    [Fact]
+    public void InstrumentedMessageProcessor_GetAssetCount_UsesFixedSynchronizationStripes_Test()
+    {
+        var mockOmfMessageProcessor = new Mock<IMessageProcessor>();
+        var instrumentedMessageProcessor = new InstrumentedMessageProcessor(mockOmfMessageProcessor.Object, _mLogger.Object, TestComponentId, TestComponentType);
+        var instance = new Dictionary<string, string> { { "prop1", "prop1Value" } };
+
+        for (var i = 0; i < 200; i++)
+        {
+            var entityId = "Entity-" + i;
+            instrumentedMessageProcessor.WriteStaticValue(TestTypeIdBase, entityId, "name", "description", "dataSource",
+                instance, null, null, null, MessageAction.Create);
+            instrumentedMessageProcessor.WriteStaticValue<object>(null, entityId, "name", "description", "dataSource",
+                null, null, null, null, MessageAction.Delete);
+        }
+
+        Assert.Equal(0, instrumentedMessageProcessor.GetAssetCount());
+        Assert.Equal(64, GetPrivateField<object[]>(instrumentedMessageProcessor, "_entityWriteSync").Length);
+        Assert.Equal(64, GetPrivateField<object[]>(instrumentedMessageProcessor, "_eventWriteSync").Length);
     }
 
     [Fact]
@@ -1203,12 +1226,13 @@ public class InstrumentedMessageProcessor_Tests
     }
 
     [Fact]
-    public void InstrumentedMessageProcessor_GetEventCount_DifferentIdentities_DoNotBlockEachOther_Test()
+    public void InstrumentedMessageProcessor_GetEventCount_DifferentIdentitiesInDifferentStripes_DoNotBlockEachOther_Test()
     {
         using var firstWriteEntered = new ManualResetEventSlim(false);
         using var allowFirstWriteToReturn = new ManualResetEventSlim(false);
 
-        var blockedEventId = "Event-1".ToOmfIdentifier();
+        var (blockedEventId, unblockedEventId) = GetIdsInDifferentStripes("Event");
+        blockedEventId = blockedEventId.ToOmfIdentifier();
         var mockOmfMessageProcessor = new Mock<IMessageProcessor>();
         mockOmfMessageProcessor.Setup(mp => mp.WriteEvent(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
                 It.IsAny<DateTime>(), It.IsAny<DateTime?>(), It.IsAny<IReadOnlyDictionary<string, PropertyDefinition>>(), It.IsAny<IReadOnlyDictionary<string, PropertyDefinitionOverride>>(),
@@ -1227,12 +1251,12 @@ public class InstrumentedMessageProcessor_Tests
         var instrumentedMessageProcessor = new InstrumentedMessageProcessor(mockOmfMessageProcessor.Object, _mLogger.Object, TestComponentId, TestComponentType);
         var instance = new Dictionary<string, string> { { "prop1", "prop1Value" } };
 
-        var firstWriteTask = Task.Run(() => instrumentedMessageProcessor.WriteEvent("Event-1", TestTypeIdBase, "name", "description", "dataSource",
+        var firstWriteTask = Task.Run(() => instrumentedMessageProcessor.WriteEvent(blockedEventId, TestTypeIdBase, "name", "description", "dataSource",
             DateTime.UtcNow, null, null, null, instance, null, null, null, MessageAction.Create));
 
         Assert.True(firstWriteEntered.Wait(TimeSpan.FromSeconds(2)));
 
-        var secondWriteTask = Task.Run(() => instrumentedMessageProcessor.WriteEvent("Event-2", TestTypeIdBase, "name", "description", "dataSource",
+        var secondWriteTask = Task.Run(() => instrumentedMessageProcessor.WriteEvent(unblockedEventId, TestTypeIdBase, "name", "description", "dataSource",
             DateTime.UtcNow, null, null, null, instance, null, null, null, MessageAction.Create));
 
         Assert.True(secondWriteTask.Wait(TimeSpan.FromSeconds(2)));
@@ -2115,5 +2139,36 @@ public class InstrumentedMessageProcessor_Tests
         {
             Assert.Null(actual);
         }
+    }
+
+    private static (string FirstId, string SecondId) GetIdsInDifferentStripes(string prefix)
+    {
+        var firstId = prefix + "-1";
+        var firstStripe = GetIdentityLockIndex(firstId);
+
+        for (var i = 2; i < 256; i++)
+        {
+            var nextId = prefix + "-" + i;
+            if (GetIdentityLockIndex(nextId) != firstStripe)
+            {
+                return (firstId, nextId);
+            }
+        }
+
+        throw new InvalidOperationException("Failed to find identities in different synchronization stripes.");
+    }
+
+    private static int GetIdentityLockIndex(string identityId)
+    {
+        var method = typeof(InstrumentedMessageProcessor).GetMethod("GetIdentityLockIndex", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+        return (int)method.Invoke(null, new object[] { identityId });
+    }
+
+    private static T GetPrivateField<T>(object instance, string fieldName)
+    {
+        var field = instance.GetType().GetField(fieldName, BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(field);
+        return (T)field.GetValue(instance);
     }
 }
