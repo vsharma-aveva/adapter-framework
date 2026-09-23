@@ -967,6 +967,45 @@ public class InstrumentedMessageProcessor_Tests
     }
 
     [Fact]
+    public void InstrumentedMessageProcessor_GetAssetCount_DifferentIdentities_DoNotBlockEachOther_Test()
+    {
+        using var firstWriteEntered = new ManualResetEventSlim(false);
+        using var allowFirstWriteToReturn = new ManualResetEventSlim(false);
+
+        var blockedEntityId = "Entity-1".ToOmfIdentifier();
+        var mockOmfMessageProcessor = new Mock<IMessageProcessor>();
+        mockOmfMessageProcessor.Setup(mp => mp.WriteStaticValue(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Dictionary<string, string>>(), It.IsAny<IReadOnlyDictionary<string, object>>(), It.IsAny<List<string>>(),
+                It.IsAny<IReadOnlyDictionary<string, PropertyDefinitionOverride>>(), It.IsAny<MessageAction>()))
+            .Callback((string typeId, string entityId, string name, string description, string dataSource, Dictionary<string, string> instance,
+                IReadOnlyDictionary<string, object> metadata, List<string> tags, IReadOnlyDictionary<string, PropertyDefinitionOverride> propertyOverrides, MessageAction messageAction) =>
+            {
+                if (string.Equals(entityId, blockedEntityId, StringComparison.OrdinalIgnoreCase))
+                {
+                    firstWriteEntered.Set();
+                    allowFirstWriteToReturn.Wait();
+                }
+            });
+
+        var instrumentedMessageProcessor = new InstrumentedMessageProcessor(mockOmfMessageProcessor.Object, _mLogger.Object, TestComponentId, TestComponentType);
+        var instance = new Dictionary<string, string> { { "prop1", "prop1Value" } };
+
+        var firstWriteTask = Task.Run(() => instrumentedMessageProcessor.WriteStaticValue(TestTypeIdBase, "Entity-1", "name", "description", "dataSource",
+            instance, null, null, null, MessageAction.Create));
+
+        Assert.True(firstWriteEntered.Wait(TimeSpan.FromSeconds(2)));
+
+        var secondWriteTask = Task.Run(() => instrumentedMessageProcessor.WriteStaticValue(TestTypeIdBase, "Entity-2", "name", "description", "dataSource",
+            instance, null, null, null, MessageAction.Create));
+
+        Assert.True(secondWriteTask.Wait(TimeSpan.FromSeconds(2)));
+
+        allowFirstWriteToReturn.Set();
+        Assert.True(firstWriteTask.Wait(TimeSpan.FromSeconds(2)));
+        Assert.Equal(2, instrumentedMessageProcessor.GetAssetCount());
+    }
+
+    [Fact]
     public void InstrumentedMessageProcessor_GetAssetCount_NewInstance_StartsAtZero_Test()
     {
         var mockOmfMessageProcessor = new Mock<IMessageProcessor>();
@@ -1161,6 +1200,46 @@ public class InstrumentedMessageProcessor_Tests
         Task.WaitAll(writeTask, clearTask);
 
         Assert.Equal(0, instrumentedMessageProcessor.GetEventCount());
+    }
+
+    [Fact]
+    public void InstrumentedMessageProcessor_GetEventCount_DifferentIdentities_DoNotBlockEachOther_Test()
+    {
+        using var firstWriteEntered = new ManualResetEventSlim(false);
+        using var allowFirstWriteToReturn = new ManualResetEventSlim(false);
+
+        var blockedEventId = "Event-1".ToOmfIdentifier();
+        var mockOmfMessageProcessor = new Mock<IMessageProcessor>();
+        mockOmfMessageProcessor.Setup(mp => mp.WriteEvent(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<DateTime>(), It.IsAny<DateTime?>(), It.IsAny<IReadOnlyDictionary<string, PropertyDefinition>>(), It.IsAny<IReadOnlyDictionary<string, PropertyDefinitionOverride>>(),
+                It.IsAny<Dictionary<string, string>>(), It.IsAny<IReadOnlyDictionary<string, object>>(), It.IsAny<List<string>>(), It.IsAny<List<Link>>(), It.IsAny<MessageAction>()))
+            .Callback((string eventId, string typeId, string name, string description, string dataSource, DateTime startTime, DateTime? endTime,
+                IReadOnlyDictionary<string, PropertyDefinition> extendedPropertyDefinitions, IReadOnlyDictionary<string, PropertyDefinitionOverride> propertyOverrides,
+                Dictionary<string, string> instance, IReadOnlyDictionary<string, object> metadata, List<string> tags, List<Link> relationships, MessageAction messageAction) =>
+            {
+                if (string.Equals(eventId, blockedEventId, StringComparison.OrdinalIgnoreCase))
+                {
+                    firstWriteEntered.Set();
+                    allowFirstWriteToReturn.Wait();
+                }
+            });
+
+        var instrumentedMessageProcessor = new InstrumentedMessageProcessor(mockOmfMessageProcessor.Object, _mLogger.Object, TestComponentId, TestComponentType);
+        var instance = new Dictionary<string, string> { { "prop1", "prop1Value" } };
+
+        var firstWriteTask = Task.Run(() => instrumentedMessageProcessor.WriteEvent("Event-1", TestTypeIdBase, "name", "description", "dataSource",
+            DateTime.UtcNow, null, null, null, instance, null, null, null, MessageAction.Create));
+
+        Assert.True(firstWriteEntered.Wait(TimeSpan.FromSeconds(2)));
+
+        var secondWriteTask = Task.Run(() => instrumentedMessageProcessor.WriteEvent("Event-2", TestTypeIdBase, "name", "description", "dataSource",
+            DateTime.UtcNow, null, null, null, instance, null, null, null, MessageAction.Create));
+
+        Assert.True(secondWriteTask.Wait(TimeSpan.FromSeconds(2)));
+
+        allowFirstWriteToReturn.Set();
+        Assert.True(firstWriteTask.Wait(TimeSpan.FromSeconds(2)));
+        Assert.Equal(2, instrumentedMessageProcessor.GetEventCount());
     }
 
     [Fact]
