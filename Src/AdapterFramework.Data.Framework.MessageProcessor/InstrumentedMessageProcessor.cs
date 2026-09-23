@@ -281,6 +281,11 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
         Interlocked.Exchange(ref _eventsCount, 0);
         Interlocked.Exchange(ref _assetCount, 0);
         Interlocked.Exchange(ref _eventCount, 0);
+
+        // Clear the retained identity sets along with the gauges so the next writes for any identity
+        // (new or previously known) are treated as new and correctly rebuild the count.
+        _entityIds.Clear();
+        _eventIds.Clear();
     }
 
     #endregion
@@ -410,7 +415,8 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
         }
     }
 
-    // ClearCounters() resets _assetCount but retains _entityIds, so a delete of a previously known identity must not drive the count negative.
+    // Guards against races where a delete is processed for an identity that was already removed (for example by ClearCounters()
+    // or a concurrent delete), which must not drive the count negative.
     private void DecrementAssetCountIfPositive()
     {
         int current;
@@ -443,7 +449,8 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
         }
     }
 
-    // A delete for an event that is not part of the current gauge (for example after ClearCounters) must not drive the count negative.
+    // Guards against races where a delete is processed for an event identity that was already removed (for example by
+    // ClearCounters() or a concurrent delete), which must not drive the count negative.
     private void DecrementEventCountIfPositive()
     {
         int current;

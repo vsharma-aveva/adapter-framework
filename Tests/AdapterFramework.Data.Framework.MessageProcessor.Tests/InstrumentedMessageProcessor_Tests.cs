@@ -881,7 +881,7 @@ public class InstrumentedMessageProcessor_Tests
     }
 
     [Fact]
-    public void InstrumentedMessageProcessor_GetAssetCount_ClearCounters_ResetsWithoutClearingIdentities_Test()
+    public void InstrumentedMessageProcessor_GetAssetCount_ClearCounters_ResetsAndClearsIdentities_Test()
     {
         var mockOmfMessageProcessor = new Mock<IMessageProcessor>();
         var instrumentedMessageProcessor = new InstrumentedMessageProcessor(mockOmfMessageProcessor.Object, _mLogger.Object, TestComponentId, TestComponentType);
@@ -897,21 +897,22 @@ public class InstrumentedMessageProcessor_Tests
 
         Assert.Equal(0, instrumentedMessageProcessor.GetAssetCount());
 
-        // Rewriting an identity that was known before the reset must not re-increment the count.
+        // The identity set is cleared along with the gauge, so rewriting the same identity after a reset
+        // is treated as new and increments the count again.
         instrumentedMessageProcessor.WriteStaticValue(TestTypeIdBase, "Entity-1", "name2", "description2", "dataSource",
             instance, null, null, null, MessageAction.Update);
 
-        Assert.Equal(0, instrumentedMessageProcessor.GetAssetCount());
+        Assert.Equal(1, instrumentedMessageProcessor.GetAssetCount());
 
         // A genuinely new identity still increments the count.
         instrumentedMessageProcessor.WriteStaticValue(TestTypeIdBase, "Entity-2", "name", "description", "dataSource",
             instance, null, null, null, MessageAction.Create);
 
-        Assert.Equal(1, instrumentedMessageProcessor.GetAssetCount());
+        Assert.Equal(2, instrumentedMessageProcessor.GetAssetCount());
     }
 
     [Fact]
-    public void InstrumentedMessageProcessor_GetAssetCount_ClearCounters_DeleteOfRetainedIdentity_DoesNotGoNegative_Test()
+    public void InstrumentedMessageProcessor_GetAssetCount_ClearCounters_DeleteOfClearedIdentity_DoesNotGoNegative_Test()
     {
         var mockOmfMessageProcessor = new Mock<IMessageProcessor>();
         var instrumentedMessageProcessor = new InstrumentedMessageProcessor(mockOmfMessageProcessor.Object, _mLogger.Object, TestComponentId, TestComponentType);
@@ -925,8 +926,7 @@ public class InstrumentedMessageProcessor_Tests
 
         Assert.Equal(0, instrumentedMessageProcessor.GetAssetCount());
 
-        // "Entity-1" is still tracked from before the reset, so its delete is accepted, but the already-zeroed
-        // count must stay at the floor rather than going negative.
+        // "Entity-1" is no longer tracked after the reset, so its delete is a no-op and the count stays at the floor.
         instrumentedMessageProcessor.WriteStaticValue<object>(null, "Entity-1", "name", "description", "dataSource",
             null, null, null, null, MessageAction.Delete);
 
@@ -1068,7 +1068,7 @@ public class InstrumentedMessageProcessor_Tests
     }
 
     [Fact]
-    public void InstrumentedMessageProcessor_GetEventCount_ClearCounters_ResetsWithoutClearingIdentities_Test()
+    public void InstrumentedMessageProcessor_GetEventCount_ClearCounters_ResetsAndClearsIdentities_Test()
     {
         var mockOmfMessageProcessor = new Mock<IMessageProcessor>();
         var instrumentedMessageProcessor = new InstrumentedMessageProcessor(mockOmfMessageProcessor.Object, _mLogger.Object, TestComponentId, TestComponentType);
@@ -1084,17 +1084,18 @@ public class InstrumentedMessageProcessor_Tests
 
         Assert.Equal(0, instrumentedMessageProcessor.GetEventCount());
 
-        // "Event-1" is still tracked from before the reset, so rewriting it must not re-increment the count.
+        // The identity set is cleared along with the gauge, so rewriting the same identity after a reset
+        // is treated as new and increments the count again.
         instrumentedMessageProcessor.WriteEvent("Event-1", TestTypeIdBase, "name2", "description2", "dataSource",
             DateTime.UtcNow, null, null, null, instance, null, null, null, MessageAction.Update);
 
-        Assert.Equal(0, instrumentedMessageProcessor.GetEventCount());
+        Assert.Equal(1, instrumentedMessageProcessor.GetEventCount());
 
         // A genuinely new identity still increments the count.
         instrumentedMessageProcessor.WriteEvent("Event-2", TestTypeIdBase, "name", "description", "dataSource",
             DateTime.UtcNow, null, null, null, instance, null, null, null, MessageAction.Create);
 
-        Assert.Equal(1, instrumentedMessageProcessor.GetEventCount());
+        Assert.Equal(2, instrumentedMessageProcessor.GetEventCount());
     }
 
     [Fact]
