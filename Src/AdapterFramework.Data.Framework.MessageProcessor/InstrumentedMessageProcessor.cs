@@ -38,6 +38,7 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
     private readonly ConcurrentDictionary<string, (DataStream DataStream, MessageAction MessageAction, long Sequence)> _dataStreams = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, (Link Link, MessageAction MessageAction, long Sequence)> _relationships = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, byte> _entityIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, byte> _eventIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, object> _metaDataDictionary;
     private readonly Dictionary<StreamProperties, Action<PropertyDefinitionOverride>> _propertyOverrideActions;
     private readonly string _componentId;
@@ -214,7 +215,7 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
         _messageProcessor.WriteEvent(eventId, typeId.ToOmfIdentifier(), name, description, GetDataSource(dataSource, id), startTime, endTime,
             extendedPropertyDefinitions, propertyOverrides, instance, metadata, tags, relationships, messageAction);
 
-        TrackEventCount(messageAction);
+        TrackEventCount(eventId, messageAction);
         IncrementEventsCount();
     }
 
@@ -424,16 +425,19 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
         while (Interlocked.CompareExchange(ref _assetCount, current - 1, current) != current);
     }
 
-    // Event streams are append-only with unique identities, so GetEventCount() is maintained as a running gauge that
-    // increments on each upsert and decrements on delete. This avoids retaining every historical event ID, which would
-    // otherwise grow unbounded for the lifetime of the adapter.
-    private void TrackEventCount(MessageAction messageAction)
+    // Tracks unique event identities so GetEventCount() reports a current-state gauge of retained events, mirroring the
+    // entity/asset cache. Repeated upserts of the same event ID do not increment the count more than once, and deletes of
+    // an unknown/untracked event ID do not decrement the count.
+    private void TrackEventCount(string eventId, MessageAction messageAction)
     {
         if (messageAction == MessageAction.Delete)
         {
-            DecrementEventCountIfPositive();
+            if (_eventIds.TryRemove(eventId, out _))
+            {
+                DecrementEventCountIfPositive();
+            }
         }
-        else
+        else if (_eventIds.TryAdd(eventId, 0))
         {
             Interlocked.Increment(ref _eventCount);
         }
