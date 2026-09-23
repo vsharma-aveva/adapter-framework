@@ -167,8 +167,8 @@ public class AdapterDiagnosticsService : IEdgeComponentDiagnosticsService
     {
         CreateDiagnosticsTypesStreams();
         SendStreamCountEvent(_sentStreamCount, _sentTypeCount);
-        SendAssetCountEvent(_sentAssetCount);
-        SendEventCountEvent(_sentEventCount);
+        SendAssetCountEvent(_sentAssetCount >= 0 ? _sentAssetCount : _instrumentedMessageProcessor.GetAssetCount());
+        SendEventCountEvent(_sentEventCount >= 0 ? _sentEventCount : _instrumentedMessageProcessor.GetEventCount());
     }
 
     public void Dispose()
