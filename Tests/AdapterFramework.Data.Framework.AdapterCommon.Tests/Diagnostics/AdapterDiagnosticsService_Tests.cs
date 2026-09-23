@@ -92,13 +92,14 @@ public class AdapterDiagnosticsService_Tests
     {
         var instrumentedMessageProcessor = new Mock<IInstrumentedMessageProcessor>();
         var instrumentedLogger = new Mock<IInstrumentedLogger>();
-        var expectedDataCount = 4;
+        var expectedDataCount = 5;
 
         using var adapterDiagnosticsService = new AdapterDiagnosticsService(_fakeDiagnosticsMessageProcessor, instrumentedLogger.Object, UnitTestComponentId, UnitTestComponentType, _elementNode, instrumentedMessageProcessor.Object);
 
         await adapterDiagnosticsService.StartAsync();
 
         SpinWait.SpinUntil(() => _diagnosticData.Count.Equals(expectedDataCount), DiagnosticsMessagesRunoutDelayMSecs);
+        Assert.Equal(expectedDataCount, _diagnosticData.Count);
         Assert.Empty(_diagnosticTypes);
         Assert.Empty(_diagnosticContainers);
     }
