@@ -38,7 +38,7 @@ public class AdapterDiagnosticsService_Tests
     private readonly List<DataType> _diagnosticTypes;
     private readonly List<DataStream> _diagnosticContainers;
     private readonly List<string> _diagnosticData;
-    private readonly IDiagnosticsMessageProcessor _fakeDiagnosticsMessageProcessor;
+    private readonly FakeDiagnosticsMessageProcessor _fakeDiagnosticsMessageProcessor;
     private readonly LinkNode _elementNode = new DataTypeLinkNode("abc", "def");
 
     public AdapterDiagnosticsService_Tests()
@@ -53,6 +53,11 @@ public class AdapterDiagnosticsService_Tests
         _diagnosticData = new List<string>();
 
         _fakeDiagnosticsMessageProcessor = new FakeDiagnosticsMessageProcessor(_diagnosticTypes, _diagnosticContainers, _diagnosticData, "machine.service");
+    }
+
+    private int GetDiagnosticDataCount()
+    {
+        return _fakeDiagnosticsMessageProcessor.GetDataCount();
     }
 
     [Fact]
@@ -98,8 +103,8 @@ public class AdapterDiagnosticsService_Tests
 
         await adapterDiagnosticsService.StartAsync();
 
-        SpinWait.SpinUntil(() => _diagnosticData.Count.Equals(expectedDataCount), DiagnosticsMessagesRunoutDelayMSecs);
-        Assert.Equal(expectedDataCount, _diagnosticData.Count);
+        SpinWait.SpinUntil(() => GetDiagnosticDataCount().Equals(expectedDataCount), DiagnosticsMessagesRunoutDelayMSecs);
+        Assert.Equal(expectedDataCount, GetDiagnosticDataCount());
         Assert.Empty(_diagnosticTypes);
         Assert.Empty(_diagnosticContainers);
     }

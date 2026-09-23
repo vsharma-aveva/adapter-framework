@@ -24,6 +24,7 @@ public class FakeDiagnosticsMessageProcessor : IDiagnosticsMessageProcessor
     private readonly List<DataType> _omfTypes;
     private readonly List<DataStream> _omfContainers;
     private readonly List<string> _omfData;
+    private readonly object _omfDataSyncRoot = new();
 
     public FakeDiagnosticsMessageProcessor(List<DataType> omfTypes, List<DataStream> omfContainers, List<string> omfData, string dataStreamIdPrefix = "")
     {
@@ -47,6 +48,14 @@ public class FakeDiagnosticsMessageProcessor : IDiagnosticsMessageProcessor
 
     public bool SystemDiagnosticsEnabled { get; set; }
 
+    public int GetDataCount()
+    {
+        lock (_omfDataSyncRoot)
+        {
+            return _omfData.Count;
+        }
+    }
+
     public void WriteDiagnosticsStreams(DataStream[] dataStreams)
     {
         _omfContainers.AddRange(dataStreams);
@@ -54,7 +63,10 @@ public class FakeDiagnosticsMessageProcessor : IDiagnosticsMessageProcessor
 
     public void WriteDiagnosticsValue<T>(string id, Classification classification, T instance)
     {
-        _omfData.Add(id);
+        lock (_omfDataSyncRoot)
+        {
+            _omfData.Add(id);
+        }
     }
 
     public void WriteDiagnosticsTypes(DataType[] dataTypes)
