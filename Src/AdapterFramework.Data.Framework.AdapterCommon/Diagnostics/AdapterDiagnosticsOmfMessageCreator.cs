@@ -30,12 +30,13 @@ public class AdapterDiagnosticsOmfMessageCreator
 
     private readonly LinkNode _assetNode;
     private readonly string _streamIdPrefix;
+    private readonly OmfVersion _omfVersion;
 
     #endregion
 
     #region Constructors
 
-    public AdapterDiagnosticsOmfMessageCreator(string componentId, string streamIdPrefix, LinkNode assetNode)
+    public AdapterDiagnosticsOmfMessageCreator(string componentId, string streamIdPrefix, LinkNode assetNode, OmfVersion omfVersion)
     {
         ThrowHelper.ThrowIfArgumentNull(assetNode, nameof(assetNode));
         ThrowHelper.ThrowIfArgumentNullEmptyOrWhiteSpace(componentId, nameof(componentId));
@@ -45,6 +46,7 @@ public class AdapterDiagnosticsOmfMessageCreator
             : componentId;
 
         _assetNode = assetNode;
+        _omfVersion = omfVersion;
     }
 
     #endregion
@@ -71,18 +73,18 @@ public class AdapterDiagnosticsOmfMessageCreator
 
     public string GetAssetCountStreamId() => $"{_streamIdPrefix}.{AssetCountStreamName}";
 
-    public string GetEventCountStreamId() => $"{_streamIdPrefix}.{EventCountStreamName}";
+    public string GetEventWriteCountStreamId() => $"{_streamIdPrefix}.{EventWriteCountStreamName}";
 
     public string GetErrorRateStreamId() => $"{_streamIdPrefix}.{ErrorRateStreamName}";
 
-    private static DataType[] GetTypes()
+    private DataType[] GetTypes()
     {
         var errorRateType = new[] { GetErrorRateType() };
         var otherTypes = GetMessageProcessorDiagnosticsTypes();
         return [.. errorRateType.Union(otherTypes)];
     }
 
-    private static DataType[] GetMessageProcessorDiagnosticsTypes()
+    private DataType[] GetMessageProcessorDiagnosticsTypes()
     {
         var timestampProperty = new PropertyDefinition
         {
@@ -122,13 +124,13 @@ public class AdapterDiagnosticsOmfMessageCreator
             },
         };
 
-        var eventCountDiagnosticsType = new DynamicDataType
+        var eventWriteCountDiagnosticsType = new DynamicDataType
         {
-            Id = EventCountTypeId,
+            Id = EventWriteCountTypeId,
             Properties = new Dictionary<string, PropertyDefinition>
             {
-                [nameof(EventCountEvent.Timestamp)] = timestampProperty,
-                [nameof(EventCountEvent.EventCount)] = integerProperty,
+                [nameof(EventWriteCountEvent.Timestamp)] = timestampProperty,
+                [nameof(EventWriteCountEvent.EventWriteCount)] = integerProperty,
             },
         };
 
@@ -142,7 +144,10 @@ public class AdapterDiagnosticsOmfMessageCreator
             },
         };
 
-        return new DataType[] { streamCountDiagnosticsType, assetCountDiagnosticsType, eventCountDiagnosticsType, dataRateDiagnosticsType };
+        // AssetCount and EventWriteCount are OMF 2.0 only concepts, so they are not published for earlier OMF versions.
+        return _omfVersion == OmfVersion.Omf20
+            ? new DataType[] { streamCountDiagnosticsType, assetCountDiagnosticsType, eventWriteCountDiagnosticsType, dataRateDiagnosticsType }
+            : new DataType[] { streamCountDiagnosticsType, dataRateDiagnosticsType };
     }
 
     private static DataType GetErrorRateType()
@@ -193,15 +198,19 @@ public class AdapterDiagnosticsOmfMessageCreator
         link = new Link(sourceLink, targetLink);
         links.Add((Tokens.Link, Classification.Static, link));
 
-        // Link adapter asset count to adapter component health asset
-        targetLink = new DataStreamLinkNode(GetAssetCountStreamId());
-        link = new Link(sourceLink, targetLink);
-        links.Add((Tokens.Link, Classification.Static, link));
+        // AssetCount and EventWriteCount are OMF 2.0 only concepts, so they are not linked for earlier OMF versions.
+        if (_omfVersion == OmfVersion.Omf20)
+        {
+            // Link adapter asset count to adapter component health asset
+            targetLink = new DataStreamLinkNode(GetAssetCountStreamId());
+            link = new Link(sourceLink, targetLink);
+            links.Add((Tokens.Link, Classification.Static, link));
 
-        // Link adapter event count to adapter component health asset
-        targetLink = new DataStreamLinkNode(GetEventCountStreamId());
-        link = new Link(sourceLink, targetLink);
-        links.Add((Tokens.Link, Classification.Static, link));
+            // Link adapter event write count to adapter component health asset
+            targetLink = new DataStreamLinkNode(GetEventWriteCountStreamId());
+            link = new Link(sourceLink, targetLink);
+            links.Add((Tokens.Link, Classification.Static, link));
+        }
 
         return links;
     }
@@ -225,14 +234,29 @@ public class AdapterDiagnosticsOmfMessageCreator
 
     private DataStream[] GetMessageProcessorDiagnosticsStream()
     {
+        var streamCountStream = new DataStream
+        {
+            Id = GetStreamCountStreamId(),
+            TypeId = StreamCountTypeId,
+            Name = StreamCountStreamName,
+        };
+
+        var ioRateStream = new DataStream
+        {
+            Id = GetIoRateStreamId(),
+            TypeId = IoRateTypeId,
+            Name = IoRateStreamName,
+        };
+
+        // AssetCount and EventWriteCount are OMF 2.0 only concepts, so they are not published for earlier OMF versions.
+        if (_omfVersion != OmfVersion.Omf20)
+        {
+            return new[] { streamCountStream, ioRateStream };
+        }
+
         return new[]
         {
-            new DataStream
-            {
-                Id = GetStreamCountStreamId(),
-                TypeId = StreamCountTypeId,
-                Name = StreamCountStreamName,
-            },
+            streamCountStream,
             new DataStream
             {
                 Id = GetAssetCountStreamId(),
@@ -241,16 +265,11 @@ public class AdapterDiagnosticsOmfMessageCreator
             },
             new DataStream
             {
-                Id = GetEventCountStreamId(),
-                TypeId = EventCountTypeId,
-                Name = EventCountStreamName,
+                Id = GetEventWriteCountStreamId(),
+                TypeId = EventWriteCountTypeId,
+                Name = EventWriteCountStreamName,
             },
-            new DataStream
-            {
-                Id = GetIoRateStreamId(),
-                TypeId = IoRateTypeId,
-                Name = IoRateStreamName,
-            },
+            ioRateStream,
         };
     }
 

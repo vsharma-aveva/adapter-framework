@@ -1,4 +1,4 @@
-// Copyright 2018-2026 AVEVA Group Limited
+﻿// Copyright 2018-2026 AVEVA Group Limited
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ public class FakeDiagnosticsMessageProcessor : IDiagnosticsMessageProcessor
     private readonly List<DataType> _omfTypes;
     private readonly List<DataStream> _omfContainers;
     private readonly List<string> _omfData;
+    private readonly List<(string Id, object Instance)> _writtenValues = new();
     private readonly object _omfDataSyncRoot = new();
 
     public FakeDiagnosticsMessageProcessor(List<DataType> omfTypes, List<DataStream> omfContainers, List<string> omfData, string dataStreamIdPrefix = "")
@@ -48,6 +49,19 @@ public class FakeDiagnosticsMessageProcessor : IDiagnosticsMessageProcessor
 
     public bool SystemDiagnosticsEnabled { get; set; }
 
+    /// <summary>
+    /// When set, any <see cref="WriteDiagnosticsValue{T}"/> call whose stream id ends with this suffix throws.
+    /// </summary>
+    public string FailingStreamIdSuffix { get; set; }
+
+    public IReadOnlyList<(string Id, object Instance)> GetWrittenValues()
+    {
+        lock (_omfDataSyncRoot)
+        {
+            return _writtenValues.ToArray();
+        }
+    }
+
     public int GetDataCount()
     {
         lock (_omfDataSyncRoot)
@@ -63,9 +77,15 @@ public class FakeDiagnosticsMessageProcessor : IDiagnosticsMessageProcessor
 
     public void WriteDiagnosticsValue<T>(string id, Classification classification, T instance)
     {
+        if (FailingStreamIdSuffix != null && id != null && id.EndsWith(FailingStreamIdSuffix, System.StringComparison.Ordinal))
+        {
+            throw new System.InvalidOperationException($"Simulated failure writing to '{id}'.");
+        }
+
         lock (_omfDataSyncRoot)
         {
             _omfData.Add(id);
+            _writtenValues.Add((id, instance));
         }
     }
 

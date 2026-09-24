@@ -40,9 +40,7 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
     private readonly ConcurrentDictionary<string, (DataStream DataStream, MessageAction MessageAction, long Sequence)> _dataStreams = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, (Link Link, MessageAction MessageAction, long Sequence)> _relationships = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, byte> _entityIds = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, byte> _eventIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly object[] _entityWriteSync = CreateStripedLocks();
-    private readonly object[] _eventWriteSync = CreateStripedLocks();
     private readonly Dictionary<string, object> _metaDataDictionary;
     private readonly Dictionary<StreamProperties, Action<PropertyDefinitionOverride>> _propertyOverrideActions;
     private readonly string _componentId;
@@ -52,7 +50,7 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
     private int _streamCount;
     private int _typeCount;
     private int _assetCount;
-    private int _eventCount;
+    private int _eventWriteCount;
     private long _eventsCount;
     private long _cacheOrderSequence;
 
@@ -220,11 +218,13 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
     {
         var eventId = id.ToOmfIdentifier();
 
-        PerformTrackedEventWrite(
-            eventId,
-            () => _messageProcessor.WriteEvent(eventId, typeId.ToOmfIdentifier(), name, description, GetDataSource(dataSource, id), startTime, endTime,
-                extendedPropertyDefinitions, propertyOverrides, instance, metadata, tags, relationships, messageAction),
-            messageAction);
+        _messageProcessor.WriteEvent(eventId, typeId.ToOmfIdentifier(), name, description, GetDataSource(dataSource, id), startTime, endTime,
+            extendedPropertyDefinitions, propertyOverrides, instance, metadata, tags, relationships, messageAction);
+
+        if (messageAction != MessageAction.Delete)
+        {
+            Interlocked.Increment(ref _eventWriteCount);
+        }
 
         IncrementEventsCount();
     }
@@ -272,9 +272,9 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
     }
 
     /// <inheritdoc/>
-    public int GetEventCount()
+    public int GetEventWriteCount()
     {
-        return _eventCount;
+        return _eventWriteCount;
     }
 
     /// <inheritdoc/>
@@ -289,19 +289,14 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
         Interlocked.Exchange(ref _typeCount, 0);
         Interlocked.Exchange(ref _streamCount, 0);
         Interlocked.Exchange(ref _eventsCount, 0);
+        Interlocked.Exchange(ref _eventWriteCount, 0);
 
-        // Clear the retained identity sets along with the gauges so the next writes for any identity
+        // Clear the retained identity set along with the gauge so the next writes for any identity
         // (new or previously known) are treated as new and correctly rebuild the count.
         ExecuteWithAllLocksHeld(_entityWriteSync, () =>
         {
             Interlocked.Exchange(ref _assetCount, 0);
             _entityIds.Clear();
-        });
-
-        ExecuteWithAllLocksHeld(_eventWriteSync, () =>
-        {
-            Interlocked.Exchange(ref _eventCount, 0);
-            _eventIds.Clear();
         });
     }
 
@@ -421,11 +416,6 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
         ExecuteTrackedWrite(_entityWriteSync, entityId, writeAction, () => TrackEntityIdentity(entityId, messageAction));
     }
 
-    private void PerformTrackedEventWrite(string eventId, Action writeAction, MessageAction messageAction)
-    {
-        ExecuteTrackedWrite(_eventWriteSync, eventId, writeAction, () => TrackEventCount(eventId, messageAction));
-    }
-
     private static object[] CreateStripedLocks()
     {
         var locks = new object[IdentityWriteLockStripeCount];
@@ -503,40 +493,6 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
             }
         }
         while (Interlocked.CompareExchange(ref _assetCount, current - 1, current) != current);
-    }
-
-    // Tracks unique event identities so GetEventCount() reports a current-state gauge of retained events, mirroring the
-    // entity/asset cache. Repeated upserts of the same event ID do not increment the count more than once, and deletes of
-    // an unknown/untracked event ID do not decrement the count.
-    private void TrackEventCount(string eventId, MessageAction messageAction)
-    {
-        if (messageAction == MessageAction.Delete)
-        {
-            if (_eventIds.TryRemove(eventId, out _))
-            {
-                DecrementEventCountIfPositive();
-            }
-        }
-        else if (_eventIds.TryAdd(eventId, 0))
-        {
-            Interlocked.Increment(ref _eventCount);
-        }
-    }
-
-    // Guards against races where a delete is processed for an event identity that was already removed (for example by
-    // ClearCounters() or a concurrent delete), which must not drive the count negative.
-    private void DecrementEventCountIfPositive()
-    {
-        int current;
-        do
-        {
-            current = _eventCount;
-            if (current <= 0)
-            {
-                return;
-            }
-        }
-        while (Interlocked.CompareExchange(ref _eventCount, current - 1, current) != current);
     }
 
     private string GetPrefixedOrSanitizedIdentifier(string id, Classification classification)

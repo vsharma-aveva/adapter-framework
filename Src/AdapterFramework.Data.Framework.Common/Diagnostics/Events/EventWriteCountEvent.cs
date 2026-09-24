@@ -16,9 +16,9 @@ using System;
 
 namespace AdapterFramework.Data.Framework.Common.Diagnostics.Events;
 
-public class EventCountEvent
+public class EventWriteCountEvent
 {
     public DateTime Timestamp { get; set; }
 
-    public int EventCount { get; set; }
+    public int EventWriteCount { get; set; }
 }
