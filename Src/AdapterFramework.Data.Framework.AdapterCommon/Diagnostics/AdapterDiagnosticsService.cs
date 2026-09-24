@@ -67,7 +67,7 @@ public class AdapterDiagnosticsService : IEdgeComponentDiagnosticsService
     private int _sentStreamCount = -1;
     private int _sentTypeCount = -1;
     private int _sentAssetCount = -1;
-    private int _sentEventWriteCount = -1;
+    private long _sentEventWriteCount = -1;
     private bool _failedToCreateDiagnosticsTypes;
     private bool _failedToUpdateErrorRate;
     private bool _failedToUpdateMessageProcessorStatistics;
@@ -78,6 +78,21 @@ public class AdapterDiagnosticsService : IEdgeComponentDiagnosticsService
     #endregion
 
     #region Public Constructor
+
+    /// <summary>
+    /// Instantiates a new instance of the <see cref="AdapterDiagnosticsService"/> class publishing with <see cref="OmfVersion.Omf12"/>.
+    /// </summary>
+    /// <param name="diagnosticsMessageProcessor">Instance of <see cref="IDiagnosticsMessageProcessor"/> service.</param>
+    /// <param name="instrumentedMessageProcessor">Instance of <see cref="IInstrumentedMessageProcessor"/> service.</param>
+    /// <param name="componentId">The adapter component ID.</param>
+    /// <param name="componentType">The adapter type.</param>
+    /// <param name="elementNode">The node to link all the created streams to.</param>
+    /// <param name="instrumentedLogger">Instance of <see cref="IInstrumentedLogger"/> service.</param>
+    public AdapterDiagnosticsService(IDiagnosticsMessageProcessor diagnosticsMessageProcessor, IInstrumentedLogger instrumentedLogger,
+        string componentId, string componentType, LinkNode elementNode, IInstrumentedMessageProcessor instrumentedMessageProcessor)
+        : this(diagnosticsMessageProcessor, instrumentedLogger, componentId, componentType, elementNode, instrumentedMessageProcessor, OmfVersion.Omf12)
+    {
+    }
 
     /// <summary>
     /// Instantiates a new instance of the <see cref="AdapterDiagnosticsService"/> class.
@@ -179,7 +194,8 @@ public class AdapterDiagnosticsService : IEdgeComponentDiagnosticsService
         if (_omfVersion == OmfVersion.Omf20)
         {
             SendAssetCountEvent(_sentAssetCount >= 0 ? _sentAssetCount : _instrumentedMessageProcessor.GetAssetCount());
-            SendEventWriteCountEvent(_sentEventWriteCount >= 0 ? _sentEventWriteCount : _instrumentedMessageProcessor.GetEventWriteCount());
+            var lastSentEventWriteCount = Interlocked.Read(ref _sentEventWriteCount);
+            SendEventWriteCountEvent(lastSentEventWriteCount >= 0 ? lastSentEventWriteCount : _instrumentedMessageProcessor.GetEventWriteCount());
         }
     }
 
@@ -403,7 +419,7 @@ public class AdapterDiagnosticsService : IEdgeComponentDiagnosticsService
 
             var currentEventWriteCount = _instrumentedMessageProcessor.GetEventWriteCount();
 
-            if (currentEventWriteCount != _sentEventWriteCount)
+            if (currentEventWriteCount != Interlocked.Read(ref _sentEventWriteCount))
             {
                 Interlocked.Exchange(ref _sentEventWriteCount, currentEventWriteCount);
 
@@ -434,7 +450,7 @@ public class AdapterDiagnosticsService : IEdgeComponentDiagnosticsService
         }
     }
 
-    private void SendEventWriteCountEvent(int eventWriteCount)
+    private void SendEventWriteCountEvent(long eventWriteCount)
     {
         var eventWriteCountEvent = new EventWriteCountEvent
         {

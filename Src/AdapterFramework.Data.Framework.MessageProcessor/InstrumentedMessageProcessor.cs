@@ -50,7 +50,7 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
     private int _streamCount;
     private int _typeCount;
     private int _assetCount;
-    private int _eventWriteCount;
+    private long _eventWriteCount;
     private long _eventsCount;
     private long _cacheOrderSequence;
 
@@ -272,9 +272,9 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
     }
 
     /// <inheritdoc/>
-    public int GetEventWriteCount()
+    public long GetEventWriteCount()
     {
-        return _eventWriteCount;
+        return Interlocked.Read(ref _eventWriteCount);
     }
 
     /// <inheritdoc/>

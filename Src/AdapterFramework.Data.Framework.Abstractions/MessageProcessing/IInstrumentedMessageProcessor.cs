@@ -54,7 +54,7 @@ public interface IInstrumentedMessageProcessor : IMessageProcessor
     /// Implementations relying on the default interface member report 0.
     /// </summary>
     /// <returns>Current event write count.</returns>
-    int GetEventWriteCount() => 0;
+    long GetEventWriteCount() => 0;
 
     /// <summary>
     /// Gets and resets total number of data events sent through the processor and resets

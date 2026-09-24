@@ -36,6 +36,11 @@ public class AdapterDiagnosticsOmfMessageCreator
 
     #region Constructors
 
+    public AdapterDiagnosticsOmfMessageCreator(string componentId, string streamIdPrefix, LinkNode assetNode)
+        : this(componentId, streamIdPrefix, assetNode, OmfVersion.Omf12)
+    {
+    }
+
     public AdapterDiagnosticsOmfMessageCreator(string componentId, string streamIdPrefix, LinkNode assetNode, OmfVersion omfVersion)
     {
         ThrowHelper.ThrowIfArgumentNull(assetNode, nameof(assetNode));
@@ -97,6 +102,11 @@ public class AdapterDiagnosticsOmfMessageCreator
             Type = Tokens.IntegerToken,
             Format = Tokens.Int32Token,
         };
+        var longProperty = new PropertyDefinition
+        {
+            Type = Tokens.IntegerToken,
+            Format = Tokens.Int64Token,
+        };
         var doubleProperty = new PropertyDefinition
         {
             Type = Tokens.NumberToken,
@@ -130,7 +140,7 @@ public class AdapterDiagnosticsOmfMessageCreator
             Properties = new Dictionary<string, PropertyDefinition>
             {
                 [nameof(EventWriteCountEvent.Timestamp)] = timestampProperty,
-                [nameof(EventWriteCountEvent.EventWriteCount)] = integerProperty,
+                [nameof(EventWriteCountEvent.EventWriteCount)] = longProperty,
             },
         };
 

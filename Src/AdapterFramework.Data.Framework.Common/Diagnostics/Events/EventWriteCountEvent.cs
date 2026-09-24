@@ -20,5 +20,5 @@ public class EventWriteCountEvent
 {
     public DateTime Timestamp { get; set; }
 
-    public int EventWriteCount { get; set; }
+    public long EventWriteCount { get; set; }
 }
