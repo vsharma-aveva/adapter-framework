@@ -41,6 +41,7 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
     private readonly ConcurrentDictionary<string, (Link Link, MessageAction MessageAction, long Sequence)> _relationships = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, byte> _entityIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly object[] _entityWriteSync = CreateStripedLocks();
+    private readonly object _eventWriteCountSync = new();
     private readonly Dictionary<string, object> _metaDataDictionary;
     private readonly Dictionary<StreamProperties, Action<PropertyDefinitionOverride>> _propertyOverrideActions;
     private readonly string _componentId;
@@ -53,6 +54,8 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
     private long _eventWriteCount;
     private long _eventsCount;
     private long _cacheOrderSequence;
+    private int _activeEventWriteCountOperations;
+    private bool _resettingEventWriteCount;
 
     #endregion
 
@@ -218,12 +221,15 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
     {
         var eventId = id.ToOmfIdentifier();
 
-        _messageProcessor.WriteEvent(eventId, typeId.ToOmfIdentifier(), name, description, GetDataSource(dataSource, id), startTime, endTime,
-            extendedPropertyDefinitions, propertyOverrides, instance, metadata, tags, relationships, messageAction);
-
         if (messageAction != MessageAction.Delete)
         {
-            Interlocked.Increment(ref _eventWriteCount);
+            ExecuteTrackedEventWrite(() => _messageProcessor.WriteEvent(eventId, typeId.ToOmfIdentifier(), name, description, GetDataSource(dataSource, id), startTime, endTime,
+                extendedPropertyDefinitions, propertyOverrides, instance, metadata, tags, relationships, messageAction));
+        }
+        else
+        {
+            _messageProcessor.WriteEvent(eventId, typeId.ToOmfIdentifier(), name, description, GetDataSource(dataSource, id), startTime, endTime,
+                extendedPropertyDefinitions, propertyOverrides, instance, metadata, tags, relationships, messageAction);
         }
 
         IncrementEventsCount();
@@ -289,7 +295,7 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
         Interlocked.Exchange(ref _typeCount, 0);
         Interlocked.Exchange(ref _streamCount, 0);
         Interlocked.Exchange(ref _eventsCount, 0);
-        Interlocked.Exchange(ref _eventWriteCount, 0);
+        ResetEventWriteCount();
 
         // Clear the retained identity set along with the gauge so the next writes for any identity
         // (new or previously known) are treated as new and correctly rebuild the count.
@@ -438,6 +444,21 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
         }
     }
 
+    private void ExecuteTrackedEventWrite(Action writeAction)
+    {
+        EnterEventWriteCountOperation();
+
+        try
+        {
+            writeAction();
+            Interlocked.Increment(ref _eventWriteCount);
+        }
+        finally
+        {
+            ExitEventWriteCountOperation();
+        }
+    }
+
     private static void ExecuteWithAllLocksHeld(object[] stripedLocks, Action action)
     {
         for (var i = 0; i < stripedLocks.Length; i++)
@@ -461,6 +482,49 @@ public class InstrumentedMessageProcessor : IInstrumentedMessageProcessor
     private static int GetIdentityLockIndex(string identityId)
     {
         return (StringComparer.OrdinalIgnoreCase.GetHashCode(identityId) & int.MaxValue) % IdentityWriteLockStripeCount;
+    }
+
+    private void EnterEventWriteCountOperation()
+    {
+        lock (_eventWriteCountSync)
+        {
+            while (_resettingEventWriteCount)
+            {
+                Monitor.Wait(_eventWriteCountSync);
+            }
+
+            _activeEventWriteCountOperations++;
+        }
+    }
+
+    private void ExitEventWriteCountOperation()
+    {
+        lock (_eventWriteCountSync)
+        {
+            _activeEventWriteCountOperations--;
+
+            if (_activeEventWriteCountOperations == 0)
+            {
+                Monitor.PulseAll(_eventWriteCountSync);
+            }
+        }
+    }
+
+    private void ResetEventWriteCount()
+    {
+        lock (_eventWriteCountSync)
+        {
+            _resettingEventWriteCount = true;
+
+            while (_activeEventWriteCountOperations > 0)
+            {
+                Monitor.Wait(_eventWriteCountSync);
+            }
+
+            Interlocked.Exchange(ref _eventWriteCount, 0);
+            _resettingEventWriteCount = false;
+            Monitor.PulseAll(_eventWriteCountSync);
+        }
     }
 
     // Tracks unique entity identities so GetAssetCount() reports a current-state gauge, mirroring the stream/type caches.

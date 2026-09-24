@@ -1195,6 +1195,41 @@ public class InstrumentedMessageProcessor_Tests
     }
 
     [Fact]
+    public async Task InstrumentedMessageProcessor_GetEventWriteCount_ClearCounters_WaitsForWrappedWriteIncrement_Test()
+    {
+        using var writeEntered = new ManualResetEventSlim(false);
+        using var allowWriteToReturn = new ManualResetEventSlim(false);
+
+        var mockOmfMessageProcessor = new Mock<IMessageProcessor>();
+        mockOmfMessageProcessor.Setup(mp => mp.WriteEvent(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<DateTime>(), It.IsAny<DateTime?>(), It.IsAny<IReadOnlyDictionary<string, PropertyDefinition>>(), It.IsAny<IReadOnlyDictionary<string, PropertyDefinitionOverride>>(),
+                It.IsAny<Dictionary<string, string>>(), It.IsAny<IReadOnlyDictionary<string, object>>(), It.IsAny<List<string>>(), It.IsAny<List<Link>>(), It.IsAny<MessageAction>()))
+            .Callback(() =>
+            {
+                writeEntered.Set();
+                allowWriteToReturn.Wait();
+            });
+
+        var instrumentedMessageProcessor = new InstrumentedMessageProcessor(mockOmfMessageProcessor.Object, _mLogger.Object, TestComponentId, TestComponentType);
+        var instance = new Dictionary<string, string> { { "prop1", "prop1Value" } };
+
+        var writeTask = Task.Run(() => instrumentedMessageProcessor.WriteEvent("Event-1", TestTypeIdBase, "name", "description", "dataSource",
+            DateTime.UtcNow, null, null, null, instance, null, null, null, MessageAction.Create));
+
+        Assert.True(writeEntered.Wait(TimeSpan.FromSeconds(2)));
+
+        var clearTask = Task.Run(() => instrumentedMessageProcessor.ClearCounters());
+
+        await Task.Delay(TimeSpan.FromMilliseconds(200));
+        Assert.False(clearTask.IsCompleted);
+
+        allowWriteToReturn.Set();
+        await Task.WhenAll(writeTask, clearTask);
+
+        Assert.Equal(0, instrumentedMessageProcessor.GetEventWriteCount());
+    }
+
+    [Fact]
     public void InstrumentedMessageProcessor_GetEventWriteCount_NewInstance_StartsAtZero_Test()
     {
         var mockOmfMessageProcessor = new Mock<IMessageProcessor>();
